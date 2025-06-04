@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // Make sure to set this in your .env file
+}
+
+// 1. User Accounts
+model User {
+  user_id       String   @id @default(uuid())
+  email         String   @unique
+  password_hash String
+  full_name     String?
+  company_name  String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  file_uploads          FileUpload[]
+  data_processing_jobs  DataProcessingJob[]
+  processing_results    ProcessingResult[]
+  error_logs            ErrorLog[]
+}
+
+// 2. File Uploads
+model FileUpload {
+  file_id           String   @id @default(uuid())
+  user_id           String
+  original_filename String
+  storage_path      String // e.g., S3 key, local path
+  file_type         String // 'csv', 'xlsx', 'json', etc.
+  file_size_bytes   BigInt?
+  upload_status     String   @default("pending") // 'pending', 'uploaded', 'validated', 'processing_error'
+  metadata          Json?    // e.g., { "headers": ["col1", "col2"], "row_count": 1000 }
+  uploaded_at       DateTime @default(now())
+  deleted_at        DateTime? // For soft deletes
+
+  user                 User                  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  data_processing_jobs DataProcessingJob[] // A file might be used in multiple jobs if re-processed
+
+  @@index([user_id])
+}
+
+// 3. Data Processing Jobs
+model DataProcessingJob {
+  job_id        String   @id @default(uuid())
+  user_id       String
+  job_name      String? // User-defined name for the job
+  job_type      String   // e.g., 'csv_import', 'excel_transform', 'api_push_google_sheets'
+  input_file_id String?
+  status        String   @default("pending") // 'pending', 'queued', 'running', 'completed', 'failed', 'scheduled', 'cancelled'
+  config        Json?    // Job-specific settings: transformation rules, API target details
+  scheduled_at  DateTime? // For jobs scheduled with Agenda
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  user              User               @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  input_file        FileUpload?        @relation(fields: [input_file_id], references: [file_id], onDelete: SetNull)
+  results           ProcessingResult[]
+  error_logs        ErrorLog[]
+
+  @@index([user_id])
+  @@index([status])
+  @@index([job_type])
+  @@index([input_file_id])
+}
+
+// 4. Processing Results
+model ProcessingResult {
+  result_id   String   @id @default(uuid())
+  job_id      String
+  user_id     String   // Denormalized for easier user-specific queries
+  result_type String   // 'summary_stats', 'transformed_data_link', 'api_response_log'
+  data        Json     // e.g., { "rows_processed": 100, "rows_failed": 2, "output_file_path": "s3://bucket/path/output.csv" }
+  status      String   @default("success") // 'success', 'partial_success', 'failure'
+  created_at  DateTime @default(now())
+
+  job  DataProcessingJob @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  user User              @relation(fields: [user_id], references: [user_id], onDelete: Cascade) // Relation for the denormalized user_id
+
+  @@index([job_id])
+  @@index([user_id])
+}
+
+// 5. Error Logs
+model ErrorLog {
+  log_id        Int      @id @default(autoincrement()) // Using Int with autoincrement for high-frequency inserts
+  job_id        String?
+  user_id       String?  // Denormalized for easier user-specific queries
+  timestamp     DateTime @default(now())
+  error_message String   @db.Text // Use @db.Text for potentially long messages
+  error_stack   String?  @db.Text
+  severity      String   @default("error") // 'info', 'warning', 'error', 'critical'
+  context_data  Json?    // e.g., { "row_number": 123, "input_snippet": "...", "failed_step": "data_validation" }
+
+  job  DataProcessingJob? @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  user User?              @relation(fields: [user_id], references: [user_id], onDelete: Cascade) // Relation for the denormalized user_id
+
+  @@index([job_id])
+  @@index([user_id])
+  @@index([timestamp])
+  @@index([severity])
+}

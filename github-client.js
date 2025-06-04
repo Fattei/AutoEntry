@@ -1,13 +1,19 @@
-const { Octokit } = require("@octokit/rest");
+// github-client.js
+require('dotenv').config();
+let octokit;
 
-// Use a GitHub token with repo access stored in env
-const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
-});
+async function getOctokitInstance() {
+  if (!octokit) {
+    const { Octokit } = await import("@octokit/rest");
+    octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  }
+  return octokit;
+}
 
 async function listReposForUser(username) {
   try {
-    const repos = await octokit.repos.listForUser({ username });
+    const client = await getOctokitInstance();
+    const repos = await client.repos.listForUser({ username });
     return repos.data;
   } catch (error) {
     console.error("GitHub API Error:", error);
@@ -17,7 +23,8 @@ async function listReposForUser(username) {
 
 async function getRepoContents(owner, repo, path = "") {
   try {
-    const contents = await octokit.repos.getContent({
+    const client = await getOctokitInstance();
+    const contents = await client.repos.getContent({
       owner,
       repo,
       path,
